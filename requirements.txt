@@ -7,4 +7,5 @@ rdkit==2024.3.5
 scikit-learn==1.5.1
 qiskit==1.1.1
 qiskit-aer==0.15.1
+gunicorn==20.1.0
 qiskit-machine-learning==0.8.2
