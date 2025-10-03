@@ -3,9 +3,7 @@ import os
 import pandas as pd
 import numpy as np
 import json
-import pickle
 import requests
-import joblib
 import random
 
 # --- Core ML & Scientific Libraries ---
@@ -397,6 +395,9 @@ class EnhancedQuantumClassicalHybrid:
         X_combined = np.hstack([X_classical_scaled, X_quantum_scaled]) if X_quantum_scaled.size > 0 else X_classical_scaled
         return self.ensemble.predict(X_combined)
 
+
+import pickle
+import joblib
 # ==============================================================================
 # 📂 MODEL FILE PATHS
 # ==============================================================================
@@ -2046,4 +2047,5 @@ if __name__ == '__main__':
     # NOTE: Do NOT train the model when running the app.
     # The training should be done separately using your other script.
     print("🚀 Starting Flask application...")
+
     app.run(debug=True, host='0.0.0.0', port=5000)
