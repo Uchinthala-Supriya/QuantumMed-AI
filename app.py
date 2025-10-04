@@ -20,7 +20,6 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor # Required for loading the model
 from sklearn.linear_model import Ridge # Required for loading the model
 from sklearn.decomposition import PCA
-from gradio_client import Client
 
 # --- Quantum Simulation ---
 from qiskit import QuantumCircuit
@@ -2071,4 +2070,5 @@ if __name__ == '__main__':
     # NOTE: Do NOT train the model when running the app.
     # The training should be done separately using your other script.
     print("🚀 Starting Flask application...")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    port = int(os.environ.get('PORT', 10000))
+    app.run(debug=False, host='0.0.0.0', port=port)
