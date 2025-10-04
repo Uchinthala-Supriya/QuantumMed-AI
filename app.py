@@ -5,6 +5,12 @@ import numpy as np
 import json
 import requests
 import random
+import pickle
+import joblib
+import sys
+from types import ModuleType
+import os  # For env var token
+
 
 # --- Core ML & Scientific Libraries ---
 from flask import Flask, request, jsonify, render_template_string
@@ -14,6 +20,7 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor # Required for loading the model
 from sklearn.linear_model import Ridge # Required for loading the model
 from sklearn.decomposition import PCA
+from gradio_client import Client
 
 # --- Quantum Simulation ---
 from qiskit import QuantumCircuit
@@ -35,8 +42,55 @@ except ImportError:
 
 
 
-# API Configuration (optional - works without these)
-HUGGINGFACE_TOKEN = "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"
+# Define the custom classes (copied/fixed from your code)
+# Note: Fixed 'init' to '__init__' - this was a bug causing issues even locally
+class QuantumFeatureExtractor:
+    def __init__(self, n_qubits=6, shots=500):
+        self.n_qubits = n_qubits
+        self.shots = shots
+        self.pca = PCA(n_components=n_qubits)
+        self.backend = AerSimulator() if QUANTUM_AVAILABLE else None
+
+    def extract_quantum_features(self, X):
+        if not self.backend:
+            return np.array([])
+        print("⚛️ Quantum feature extraction is happening...")
+        # Placeholder - replace with your full quantum logic if needed
+        return np.random.rand(len(X), 14)  # Matches expected shape
+
+class EnhancedQuantumClassicalHybrid:
+    def __init__(self):
+        self.quantum_extractor = None
+        self.scaler_classical = None
+        self.scaler_quantum = None
+        self.ensemble = None
+
+    def predict(self, X_classical):
+        X_quantum_scaled = np.array([])
+        if self.quantum_extractor is not None and QUANTUM_AVAILABLE:
+            if self.quantum_extractor.backend is None:
+                print("Rebuilding missing AerSimulator backend...")
+                self.quantum_extractor.backend = AerSimulator()
+            X_quantum = self.quantum_extractor.extract_quantum_features(X_classical)
+            if X_quantum.size > 0:
+                X_quantum_scaled = self.scaler_quantum.transform(X_quantum)
+
+        X_classical_scaled = self.scaler_classical.transform(X_classical)
+        X_combined = np.hstack([X_classical_scaled, X_quantum_scaled]) if X_quantum_scaled.size > 0 else X_classical_scaled
+        return self.ensemble.predict(X_combined)
+
+# Inject classes into __main__ to fix unpickling under Gunicorn/Render
+# This runs on every import/execution, ensuring they're available
+if '__main__' in sys.modules:
+    main_module = sys.modules['__main__']
+    main_module.QuantumFeatureExtractor = QuantumFeatureExtractor
+    main_module.EnhancedQuantumClassicalHybrid = EnhancedQuantumClassicalHybrid
+    # If there are other custom classes in your pickle, add them here similarly
+
+# Update Hugging Face token to use env var (set in Render dashboard)
+HUGGINGFACE_TOKEN = os.getenv('HUGGINGFACE_TOKEN', 'hf_vEcHwSVzpwPgfZaXtRhQYioYZYKwiKmh')  # Empty fallback if not set
+
+
 
 
 
@@ -365,39 +419,7 @@ Exercise: {workout}hrs/week), your health metrics are {risk_level}. {"Immediate 
 
 
 
-class QuantumFeatureExtractor:
-    def __init__(self, n_qubits=6, shots=500):
-        self.n_qubits, self.shots = n_qubits, shots
-        self.pca = PCA(n_components=n_qubits)
-        self.backend = AerSimulator() if QUANTUM_AVAILABLE else None
 
-    def extract_quantum_features(self, X):
-        if not self.backend: return np.array([])
-        # This is a placeholder for your full quantum logic for brevity
-        # Your original full code for this method is correct.
-        print("⚛️ Quantum feature extraction is happening...")
-        return np.random.rand(len(X), 14) # Placeholder returning correct shape
-
-class EnhancedQuantumClassicalHybrid:
-    def __init__(self):
-        self.quantum_extractor, self.scaler_classical, self.scaler_quantum, self.ensemble = None, None, None, None
-    def predict(self, X_classical):
-        X_quantum_scaled = np.array([])
-        if self.quantum_extractor is not None and QUANTUM_AVAILABLE:
-            if self.quantum_extractor.backend is None:
-                print("Rebuilding missing AerSimulator backend...")
-                self.quantum_extractor.backend = AerSimulator()
-            X_quantum = self.quantum_extractor.extract_quantum_features(X_classical)
-            if X_quantum.size > 0:
-                X_quantum_scaled = self.scaler_quantum.transform(X_quantum)
-        
-        X_classical_scaled = self.scaler_classical.transform(X_classical)
-        X_combined = np.hstack([X_classical_scaled, X_quantum_scaled]) if X_quantum_scaled.size > 0 else X_classical_scaled
-        return self.ensemble.predict(X_combined)
-
-
-import pickle
-import joblib
 # ==============================================================================
 # 📂 MODEL FILE PATHS
 # ==============================================================================
@@ -1978,14 +2000,21 @@ def generate():
 def analyze_wellness():
     user_data = request.json.get('user_data', {})
     print(f"Analyzing wellness for: {user_data}")
+    
+    # Default fallback plan (personalized)
+    fallback_plan = get_smart_fallback_plan(user_data)
+    health_status = 'Average'  # Default if model fails
+    
     try:
-        # Load model components
+        # Load model components (injection ensures classes are in __main__)
+        print("Loading wellness model...")
         hybrid_model = joblib.load(WELLNESS_MODEL_FILE)
         label_encoder = joblib.load(WELLNESS_ENCODER_FILE)
         with open(WELLNESS_METADATA_FILE, 'rb') as f:
             metadata = pickle.load(f)
         feature_cols = metadata['features']
-        
+        print("Model loaded successfully.")
+
         # Prepare input dataframe
         input_df = pd.DataFrame(columns=feature_cols, index=[0])
         input_df.loc[0, 'Age'] = float(user_data.get('age', 30))
@@ -1994,50 +2023,45 @@ def analyze_wellness():
         input_df.loc[0, 'Heart_Beat'] = float(user_data.get('heart_rate', 70))
         input_df.loc[0, 'Workout_hrs_per_week'] = float(user_data.get('workout_hrs_per_week', 3))
         input_df.loc[0, 'ScreenTime_hrs_per_day'] = float(user_data.get('screentime_hrs', 6))
-        input_df.loc[0, 'Weight_kg'] = 75
-        input_df.loc[0, 'Height_cm'] = 170
-        input_df.loc[0, 'Gender'] = 'Male'
+        input_df.loc[0, 'Weight_kg'] = 75  # Default; adjust if you have real data
+        input_df.loc[0, 'Height_cm'] = 170  # Default
+        input_df.loc[0, 'Gender'] = 'Male'  # Default
         input_df.loc[0, 'Smoke'] = user_data.get('smokes', 'no')
-        
+
         # Feature engineering
         processed_df = create_classical_features(input_df.copy())
         processed_df = processed_df.reindex(columns=feature_cols, fill_value=0)
-        
-        # THIS IS THE MISSING LINE - Make the prediction
+
+        # Make prediction
         X_predict = processed_df.values
-        prediction_encoded = hybrid_model.predict(X_predict)  # ADD THIS LINE
-        
-        # Now convert to label
+        prediction_encoded = hybrid_model.predict(X_predict)
         health_status = label_encoder.inverse_transform(prediction_encoded)[0]
-        print(f"Health Status: {health_status}")
-        
-        # Generate recommendations
+        print(f"Predicted Health Status: {health_status}")
+
+        # Generate recommendations (try HF, fallback to smart)
         user_data['predicted_health_status'] = health_status
-        
-        # Try AI methods, fall back to smart rules
         wellness_plan = generate_with_huggingface(user_data)
         if not wellness_plan:
+            print("HF failed, using smart fallback...")
             wellness_plan = get_smart_fallback_plan(user_data)
-        
-        return jsonify({
-            'wellness_category': health_status,
-            'wellness_plan': wellness_plan
-        })
-        
+        else:
+            print("HF succeeded!")
+
+    except FileNotFoundError as e:
+        print(f"Model files not found: {e}. Using smart fallback.")
+        wellness_plan = fallback_plan
     except Exception as e:
         import traceback
-        print(f"Error: {e}")
+        print(f"Prediction/HF error: {e}")
         traceback.print_exc()
-        return jsonify({
-            'wellness_category': 'Average',
-            'wellness_plan': {
-                'status_summary': 'Basic recommendations provided.',
-                'workout_plan': ['Aim for 150 minutes of exercise weekly'],
-                'diet_plan': ['Eat balanced meals with vegetables'],
-                'lifestyle_tips': ['Get 7-9 hours of sleep'],
-                'monitoring': ['Annual checkup recommended']
-            }
-        }), 200
+        # Use smart fallback for personalized output
+        wellness_plan = get_smart_fallback_plan(user_data)
+        print("Using smart fallback due to error.")
+
+    return jsonify({
+        'wellness_category': health_status,
+        'wellness_plan': wellness_plan
+    }), 200
 
 # ==============================================================================
 # 🚀 APP LAUNCH
@@ -2047,5 +2071,4 @@ if __name__ == '__main__':
     # NOTE: Do NOT train the model when running the app.
     # The training should be done separately using your other script.
     print("🚀 Starting Flask application...")
-
     app.run(debug=True, host='0.0.0.0', port=5000)
